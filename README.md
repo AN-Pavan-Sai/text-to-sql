@@ -183,21 +183,25 @@ Retrieve the most relevant tables for a natural-language question using semantic
 
 ### POST /generate-sql
 
-Generate a SQL query from a question and pre-built schema context. It includes a robust regex parser to safely strip `<think>...</think>` tags if advanced reasoning models are used.
+Generate a SQL query from a question using the full retrieval + LLM pipeline. It includes a robust regex parser to safely strip `<think>...</think>` tags if advanced reasoning models are used.
 
 **Request Body:**
 ```json
 {
   "question": "What is the average CPU count?",
-  "schema_context": "Table: INSTANCES ...\n  Columns: ..."
+  "use_retrieved_context": true
 }
 ```
 
 **Response:**
 ```json
 {
-  "question": "What is the average CPU count?",
-  "generated_sql": "SELECT AVG(VCPUS) AS avg_cpu_count FROM INSTANCES;"
+  "sql": "SELECT AVG(VCPUS) AS avg_cpu_count FROM INSTANCES;",
+  "retrieved_tables": ["INSTANCES", "INSTANCE_INFO_CACHES"],
+  "is_valid_syntax": true,
+  "parsing_errors": null,
+  "confidence": 0.85,
+  "prompt_used": "System:\nYou are an expert SQL analyst...\n\nUser:\n..."
 }
 ```
 
@@ -238,21 +242,25 @@ Run the automated evaluation pipeline against the beaver-query ground truth.
 - `max_samples` (int, default 20): Number of samples to evaluate
 - `top_k` (int, optional): Tables to retrieve per question
 
-**Response:** Returns aggregated metrics and per-sample detail breakdowns.
+**Response:** Returns a comprehensive JSON payload containing `total_queries`, aggregated `metrics`, a `subtask_breakdown`, an `error_analysis` object, and a massive `sample_details` array for deep dive inspection.
 
 ---
 
 ## Benchmark and Metrics
 
-The `/benchmark` endpoint evaluates the system against the BeaverBench ground-truth dataset (`beaver-query`) and reports the following metrics:
+The `/benchmark` endpoint evaluates the system against the BeaverBench ground-truth dataset (`beaver-query`) and reports a highly detailed breakdown:
 
+### Core Metrics
 | Metric                      | Description                                                              |
 |-----------------------------|--------------------------------------------------------------------------|
 | retrieval_recall_at_k       | Fraction of ground-truth tables found in the top-K retrieved tables      |
 | sql_validity_rate           | Fraction of generated SQL queries that pass syntax validation            |
 | sql_exact_match_rate        | Fraction of queries where the normalised SQL matches the reference       |
 | sql_execution_match_rate    | Fraction of queries where the result set matches the reference           |
-| end_to_end_success_rate     | Fraction of queries that are fully correct across all stages             |
+| average_latency_ms          | Average end-to-end processing time per query                             |
+
+### Subtask Breakdown & Error Analysis
+The pipeline automatically categorises accuracy across advanced subtasks (e.g. `multi_table_retrieval`, `join_detection`) and buckets failures into `retrieval_failures`, `parsing_failures`, `execution_failures`, and `logic_errors`.
 
 The target for all key metrics is above 0.85 (85%).
 
