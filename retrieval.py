@@ -46,7 +46,7 @@ class SchemaRetriever:
             return
 
         logger.info("Downloading beaver-table split=%s from HuggingFace...", split)
-        ds = load_dataset("beaverbench/beaver-table", split=split)
+        ds = load_dataset("beaverbench/beaver-table", split=split, token=settings.hf_token)
 
         tables: List[Dict[str, Any]] = []
         texts: List[str] = []

@@ -11,10 +11,12 @@ FastAPI application that exposes endpoints for:
 """
 
 import logging
+import os
 from typing import Any, Dict, List, Optional
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
+
 from pydantic import BaseModel, Field
 
 from config import settings
@@ -95,6 +97,9 @@ class QueryResponse(BaseModel):
     generated_sql: str
     validation: Dict[str, Any]
     results: Dict[str, Any]
+    # Backwards compatibility for cached frontend clients
+    is_valid: bool = False
+    execution_result: Dict[str, Any] = {}
 
 
 class ValidateRequest(BaseModel):
@@ -232,6 +237,8 @@ async def query(req: QueryRequest):
             generated_sql=sql,
             validation=validation,
             results=results,
+            is_valid=validation.get("valid", False),
+            execution_result=results
         )
     except HTTPException:
         raise
@@ -281,6 +288,10 @@ async def benchmark(
         logger.exception("Benchmark error")
         raise HTTPException(status_code=500, detail=str(exc))
 
+
+# ---------------------------------------------------------------------------
+# Static files serving has been removed (API-only mode)
+# ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------
 # Entry point

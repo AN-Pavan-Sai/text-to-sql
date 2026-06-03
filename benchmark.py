@@ -111,7 +111,7 @@ def run_benchmark(
     top_k = top_k or settings.top_k_tables
 
     logger.info("Loading beaver-query split=%s ...", split)
-    ds = load_dataset("beaverbench/beaver-query", split=split)
+    ds = load_dataset("beaverbench/beaver-query", split=split, token=settings.hf_token)
 
     samples = list(ds)
     if max_samples:

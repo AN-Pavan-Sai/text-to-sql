@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     embedding_model: str = os.getenv("EMBEDDING_MODEL", "all-MiniLM-L6-v2")
     top_k_tables: int = int(os.getenv("TOP_K_TABLES", "6"))
     beaver_db_split: str = os.getenv("BEAVER_DB_SPLIT", "nova")
+    hf_token: str = os.getenv("HF_TOKEN", "")
 
     class Config:
         env_file = ".env"

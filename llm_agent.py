@@ -81,7 +81,7 @@ def generate_sql(
     question: str,
     schema_context: str,
     temperature: float = 0.0,
-    max_tokens: int = 1024,
+    max_tokens: int = 1500,
 ) -> str:
     """
     Generate a SQL query from a natural-language question.
@@ -105,6 +105,7 @@ def generate_sql(
     """
     user_message = (
         f"{FEW_SHOT_EXAMPLES}\n\n"
+        f"CRITICAL INSTRUCTION: DO NOT output any <think> tags, explanations, or reasoning steps. Output strictly the SQL query and nothing else.\n\n"
         f"Now answer the following:\n\n"
         f"Schema:\n{schema_context}\n\n"
         f"Question: {question}\n"
@@ -134,10 +135,13 @@ def generate_sql(
 
 
 def _clean_sql(raw: str) -> str:
-    """Strip markdown fences and extraneous text from LLM output."""
-    # Remove ```sql ... ``` wrappers
-    raw = re.sub(r"^```(?:sql)?\s*", "", raw, flags=re.IGNORECASE)
-    raw = re.sub(r"\s*```$", "", raw)
+    # Try to explicitly extract the sql block if it exists
+    match = re.search(r"```(?:sql)?(.*?)```", raw, flags=re.DOTALL | re.IGNORECASE)
+    if match:
+        raw = match.group(1).strip()
+    else:
+        # Fallback: remove <think> blocks even if they are unclosed
+        raw = re.sub(r"<think>.*?(?:</think>|$)", "", raw, flags=re.DOTALL).strip()
 
     # If multiple statements, keep only the first
     lines = raw.strip().split(";")
