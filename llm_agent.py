@@ -8,7 +8,7 @@ chat completions endpoint to produce a SQL query.
 
 import re
 import logging
-from typing import Optional
+from typing import Optional, Union, Tuple, Any
 
 from groq import Groq
 
@@ -81,8 +81,9 @@ def generate_sql(
     question: str,
     schema_context: str,
     temperature: float = 0.0,
-    max_tokens: int = 1500,
-) -> str:
+    max_tokens: int = 4096,
+    return_prompt: bool = False
+) -> Union[str, tuple]:
     """
     Generate a SQL query from a natural-language question.
 
@@ -97,11 +98,13 @@ def generate_sql(
         Sampling temperature (0 = deterministic).
     max_tokens : int
         Maximum tokens in the response.
+    return_prompt : bool
+        If True, returns a tuple of (sql, prompt_used).
 
     Returns
     -------
-    str
-        The generated SQL query string.
+    str or tuple
+        The generated SQL query string, or (sql, prompt).
     """
     user_message = (
         f"{FEW_SHOT_EXAMPLES}\n\n"
@@ -131,6 +134,10 @@ def generate_sql(
     raw = response.choices[0].message.content.strip()
     sql = _clean_sql(raw)
     logger.info("Generated SQL: %s", sql[:200])
+    
+    if return_prompt:
+        full_prompt = f"System:\n{SYSTEM_PROMPT}\n\nUser:\n{user_message}"
+        return sql, full_prompt
     return sql
 
 

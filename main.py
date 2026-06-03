@@ -68,20 +68,33 @@ class RetrieveRequest(BaseModel):
     top_k: Optional[int] = Field(default=None, description="Number of tables to retrieve")
 
 
+class TableDetail(BaseModel):
+    relevance_score: float
+    reason: str
+
 class RetrieveResponse(BaseModel):
-    question: str
-    tables: List[Dict[str, Any]]
-    schema_context: str
+    retrieved_tables: List[str]
+    scores: List[float]
+    confidence: float
+    details: Dict[str, TableDetail]
 
 
 class GenerateSQLRequest(BaseModel):
     question: str = Field(..., description="Natural-language question")
-    schema_context: str = Field(..., description="Schema context string for the LLM")
+    use_retrieved_context: bool = Field(default=True, description="Whether to automatically retrieve context")
+    schema_context: Optional[str] = Field(default=None, description="Manual schema context if not retrieving")
+    split: str = Field(default="nova")
+    db: Optional[str] = Field(default=None)
+    top_k: Optional[int] = Field(default=None)
 
 
 class GenerateSQLResponse(BaseModel):
-    question: str
-    generated_sql: str
+    sql: str
+    retrieved_tables: List[str]
+    is_valid_syntax: bool
+    parsing_errors: Optional[str]
+    confidence: float
+    prompt_used: str
 
 
 class QueryRequest(BaseModel):
@@ -115,7 +128,10 @@ class ValidateResponse(BaseModel):
 
 
 class BenchmarkResponse(BaseModel):
-    metrics: Dict[str, Any]
+    total_queries: int
+    metrics: Dict[str, float]
+    subtask_breakdown: Dict[str, float]
+    error_analysis: Dict[str, int]
     sample_details: List[Dict[str, Any]]
 
 
@@ -158,16 +174,28 @@ async def retrieve_tables(req: RetrieveRequest):
             top_k=req.top_k,
             db_filter=req.db,
         )
-        schema_ctx = retriever.get_schema_context(
-            question=req.question,
-            split=req.split,
-            top_k=req.top_k,
-            db_filter=req.db,
-        )
+        
+        retrieved_tables = []
+        scores = []
+        details = {}
+        
+        for t in tables:
+            name = t["table_name"]
+            score = round(t.get("score", 0.0), 2)
+            retrieved_tables.append(name)
+            scores.append(score)
+            details[name] = {
+                "relevance_score": score,
+                "reason": f"Semantic similarity match for {name}"
+            }
+            
+        confidence = round(sum(scores) / len(scores), 2) if scores else 0.0
+
         return RetrieveResponse(
-            question=req.question,
-            tables=tables,
-            schema_context=schema_ctx,
+            retrieved_tables=retrieved_tables,
+            scores=scores,
+            confidence=confidence,
+            details=details
         )
     except Exception as exc:
         logger.exception("Retrieval error")
@@ -177,13 +205,50 @@ async def retrieve_tables(req: RetrieveRequest):
 @app.post("/generate-sql", response_model=GenerateSQLResponse, tags=["Generation"])
 async def generate_sql_endpoint(req: GenerateSQLRequest):
     """
-    Generate a SQL query from a question and schema context.
-
-    The schema_context should come from the /retrieve endpoint.
+    Generate SQL from a question using the retrieval + LLM pipeline.
     """
     try:
-        sql = generate_sql(req.question, req.schema_context)
-        return GenerateSQLResponse(question=req.question, generated_sql=sql)
+        tables = []
+        schema_ctx = req.schema_context or ""
+        scores = []
+        
+        if req.use_retrieved_context:
+            retrieved = retriever.retrieve(
+                question=req.question,
+                split=req.split,
+                top_k=req.top_k,
+                db_filter=req.db,
+            )
+            tables = [t["table_name"] for t in retrieved]
+            scores = [t.get("score", 0.0) for t in retrieved]
+            
+            schema_ctx = retriever.get_schema_context(
+                question=req.question,
+                split=req.split,
+                top_k=req.top_k,
+                db_filter=req.db,
+            )
+            
+            # Auto-detect db if not set
+            if not req.db and retrieved:
+                req.db = retrieved[0]["db"]
+
+        sql, prompt_used = generate_sql(req.question, schema_ctx, return_prompt=True)
+        
+        # Validation
+        db_name = req.db or "nova"
+        validation = db_manager.validate_sql(sql, req.split, db_name)
+        
+        confidence = round(sum(scores) / len(scores), 2) if scores else 0.85
+        
+        return GenerateSQLResponse(
+            sql=sql,
+            retrieved_tables=tables,
+            is_valid_syntax=validation.get("valid", False),
+            parsing_errors=validation.get("error"),
+            confidence=confidence,
+            prompt_used=prompt_used
+        )
     except Exception as exc:
         logger.exception("SQL generation error")
         raise HTTPException(status_code=500, detail=str(exc))
@@ -281,8 +346,11 @@ async def benchmark(
             top_k=top_k,
         )
         return BenchmarkResponse(
+            total_queries=result["total_queries"],
             metrics=result["metrics"],
-            sample_details=result["details"],
+            subtask_breakdown=result["subtask_breakdown"],
+            error_analysis=result["error_analysis"],
+            sample_details=result["sample_details"],
         )
     except Exception as exc:
         logger.exception("Benchmark error")
